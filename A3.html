@@ -1,0 +1,878 @@
+<HTML>
+<HEAD>
+<title>Maze Friends</title>
+
+</HEAD>
+<BODY>
+<canvas id="myCanvas" width="800" height="500"></canvas>
+<script type="text/javascript" src="seedrandom.js"></script>
+<script type="text/javascript" src="priority_queue.js"></script>
+<script type = 'text/javascript'>
+
+var c=document.getElementById("myCanvas");
+var ctx=c.getContext("2d");
+var mazeArray = [];  
+
+// CHANGE THESE TO CHANGE SIZE / SCALE  
+var MAZESIZE = 27;
+var BLOCKSIZE = 15;
+var smartTheseus = true;
+
+var GOAL = Math.floor(MAZESIZE/2);
+var SEED = "7";  // 7 + size 27
+var START = [0, Math.floor(MAZESIZE/2)];
+
+
+
+var bfsDist = [];
+var bfsPrev = [];
+var bfsCol = [];
+var bfsQ = [];
+var SPACE = 0;
+var WALL = 1;
+var CHANGEABLE = 1;
+var UNCHANGEABLE = 0;
+var WHITE = 0;
+var GRAY = 1;
+var BLACK = 2;
+var path = [];
+var aStarPath = [];
+var theseusLoc = START;
+var WALLTOGGLE = MAZESIZE*2;
+var BREAKWALLTOGGLE = MAZESIZE;
+var bfsCheckedNodes = 0;
+var aStarCheckedNodes = 0;
+var spiders = [];
+var theseusDead = false;
+
+Math.seedrandom(SEED);
+
+function createMaze()
+{
+    var randomWall = 0;
+    for(x = 0; x<MAZESIZE; x++)
+    {   
+        mazeArray[x] = [];
+        for(y = 0; y < MAZESIZE; y++)
+        {
+            mazeArray[x][y] = [];
+            if( y%2 && ((y<(MAZESIZE)-x) == (y <= x)) || (x%2 && ((x<(MAZESIZE)-y) == (x < y))))
+            {
+                mazeArray[x][y][0] = SPACE;
+            }
+            else
+            {
+                mazeArray[x][y][0] = WALL; 
+            }
+            if(x == y || MAZESIZE-1-(x) == y || x == 0 || x == MAZESIZE-1 || y == 0 || y == MAZESIZE-1)
+            {
+                
+                mazeArray[x][y][1] = UNCHANGEABLE; // corner or outer edge, don't ever change these from wall
+            }
+            else
+            {
+                mazeArray[x][y][1] = CHANGEABLE; // not corner, go for it
+                if(Math.random()*randomWall > WALLTOGGLE && mazeArray[x][y][0] == SPACE)
+                {
+                    mazeArray[x][y][0] = WALL;
+                    mazeArray[x][y][1] = UNCHANGEABLE;
+                    randomWall = 0;
+                }
+                
+            }
+            mazeArray[x][y][2] = 0; // nothing has been visited yet 
+            randomWall++;
+        }
+    }   // default maze is done
+    
+    
+    // make changes 
+    // starting point
+    mazeArray[START[0]][START[1]][0] = SPACE;
+    mazeArray[START[0]][START[1]][1] = UNCHANGEABLE;
+    mazeArray[GOAL][GOAL][0] = SPACE;
+    mazeArray[GOAL][GOAL][1] = UNCHANGEABLE;
+
+}
+
+function changeMaze(startPoint, breakWall)
+{
+    //console.log("changemaze at " + startPoint);
+    if(mazeArray[startPoint[0]][startPoint[1]][2] == 1)
+        return;
+    mazeArray[startPoint[0]][startPoint[1]][2] = 1; // no longer unvisited
+    // get all unvisited adjacent to you
+    adjPoints = getAdjUnvisited(getAdj4Way(startPoint[0], startPoint[1], 2));
+    
+    if(adjPoints.length == 0)
+        return;
+    // There are some unvisited points.  Let's go to one of them.
+    
+    // If we're to the point where we can cross a wall, just get a random unvisited point.
+    if(breakWall == BREAKWALLTOGGLE)
+    { 
+        breakWall = 0;
+        nextPoint = randomNext(adjPoints);
+    }
+    else    // we'd rather not break a wall
+    {   
+        // get all points that are unvisited and NOT walls
+        adjPoints = getAdjUnvisited(getAdj4Way(startPoint[0], startPoint[1], 0));
+        // if this list contains nothing, our only option is a wall
+        if(adjPoints.length == 0)
+            adjPoints = getAdjUnvisited(getAdj4Way(startPoint[0], startPoint[1], 2));
+        // we know which list we're picking from, so get a random point.
+        nextPoint = randomNext(adjPoints);
+        breakWall++;
+    }
+    
+    // now we need to change the point we're on.  if it's a wall, and the next point
+    // is a wall, we can't change it.  if it's a wall, and the next point is NOT a wall,
+    // then we can make this a space!
+    if(mazeArray[startPoint[0]][startPoint[1]][0] == WALL && mazeArray[startPoint[0]][startPoint[1]][1] == CHANGEABLE && mazeArray[nextPoint[0]][nextPoint[1]][0] == SPACE)  
+        mazeArray[startPoint[0]][startPoint[1]][0] = SPACE; // if this is a wall, and it's changeable, and the nextPoint is a space, make this a space!
+    
+    // now, call this on nextPoint, and also call this on all other adjacent (unvisited) spots!
+    mazeArray[startPoint[0]][startPoint[1]][1] = 0; // no longer changeable
+
+    changeMaze(nextPoint, breakWall);
+    
+    adjPoints = getAdjUnvisited(getAdj4Way(startPoint[0], startPoint[1], 2));
+    for(x = 0; x < adjPoints.length; x++)
+        if (adjPoints[x] != nextPoint)
+            changeMaze(adjPoints[x], breakWall);
+}
+
+function drawMaze()
+{
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0,0,600,600);
+    // draws the maze
+    for(x = 0; x<MAZESIZE; x++)
+    {
+        for(y = 0; y < MAZESIZE; y++)
+        {
+            if(mazeArray[x][y][0] == WALL)
+                ctx.fillStyle = '#000000';
+            else
+                ctx.fillStyle = '#FFFFFF';
+            ctx.fillRect(x*BLOCKSIZE, y*BLOCKSIZE, BLOCKSIZE, BLOCKSIZE);
+        }
+    }
+    // draw goal square as green:
+    ctx.fillStyle = '#5DFC0A';
+    ctx.fillRect(GOAL*BLOCKSIZE, GOAL*BLOCKSIZE, BLOCKSIZE, BLOCKSIZE);
+    
+    // draw theseus at theseusLoc
+    //ctx.fillStyle = "#00BFFF";
+    //ctx.fillRect(theseusLoc[0]*BLOCKSIZE, theseusLoc[1]*BLOCKSIZE, BLOCKSIZE, BLOCKSIZE);
+}
+
+function drawTheseus()
+{
+    ctx.fillStyle = "#00BFFF";
+    ctx.fillRect(theseusLoc[0]*BLOCKSIZE, theseusLoc[1]*BLOCKSIZE, BLOCKSIZE, BLOCKSIZE);
+}
+
+function drawSpiders()
+{
+    for(x = 0; x < spiders.length; x++)
+    {
+        tempSpider = spiders[x];
+        if(tempSpider.size == 0)
+            ctx.fillStyle = '#FFDAB9';  // light pink
+        else if(tempSpider.size == 1)
+            ctx.fillStyle = '#FFA500';  // orangeish
+        else
+            ctx.fillStyle = '#8B0000'; // dark red
+        
+        ctx.fillRect(parseInt(tempSpider.locX)*BLOCKSIZE,  parseInt(tempSpider.locY)*BLOCKSIZE, BLOCKSIZE, BLOCKSIZE);
+    }
+}
+
+function updateSpiders()
+{
+    var tempSpider;
+    var adjSpots;
+    
+    for(var x = 0; x < spiders.length; x++)
+    {   
+        // move each spider.
+        var moved = false;
+        tempSpider = spiders[x];
+        adjSpots = getAdj(parseInt(tempSpider.locX), parseInt(tempSpider.locY), 1); // only get walls (for now)
+        // lowest behavior on the tree: pounce on Theseus.
+        // check to see if theseus is within 2 spaces
+        var distToT = manDist([tempSpider.locX, tempSpider.locY].toString(), [theseusLoc[0],theseusLoc[1]].toString());
+        
+        // if you can pounce on Theseus:
+        if(distToT < 3)
+        {
+            tempSpider.locX = theseusLoc[0];
+            tempSpider.locY = theseusLoc[1];
+            theseusDead = true;
+            moved = true;
+        }
+        else if(distToT < 5)
+        {   // if you can't pounce on theseus, move to the spot closest towards him
+            var currentNext = adjSpots[0];
+            var nextNext;
+            var currentToT = 0;
+            var nextToT = 0;
+            for(var z = 1; z < adjSpots.length; z++)
+            {
+                nextNext = adjSpots[z];
+                currentToT = manDist(currentNext.toString(), theseusLoc.toString());
+                nextToT = manDist([nextNext[0],nextNext[1]].toString(),[theseusLoc[0],theseusLoc[1]].toString());
+                if(currentToT >= nextToT)
+                {
+                    currentNext = nextNext;
+                }
+            }
+            tempSpider.locX = currentNext[0];
+            tempSpider.locY = currentNext[1];
+            moved = true;
+        }
+        else
+        {   // can't pounce on theseus, iterate through all other spiders and see if you can chase/run away from them
+            // check to see if smaller spiders are in range.
+            var distToOther;
+            for(var y = 0; y < spiders.length; y++)
+            {
+                otherSpider = spiders[y];
+                if(otherSpider.locX == tempSpider.locX && otherSpider.locY == tempSpider.locY)
+                    continue;  // don't do anything if it's you
+                else
+                {
+                    distToOther =  manDist([tempSpider.locX,tempSpider.locY].toString(),[otherSpider.locX,otherSpider.locY].toString());
+                    if(tempSpider.size >= otherSpider.size)
+                    {
+                        if(distToOther < 3)
+                        {   // you can pounce ( they're same size or smaller)
+                           
+                            tempSpider.locX = otherSpider.locX;
+                            tempSpider.locY = otherSpider.locY;  
+                            // random spider dies
+                            if(tempSpider.size == otherSpider.size)
+                            {
+                                if(Math.floor(Math.random()*2) == 0)
+                                    spiders.splice(spiders.indexOf(tempSpider),1);
+                                else
+                                    spiders.splice(y,1);
+                                moved = true;
+                            }
+                            else
+                            {
+                                spiders.splice(y,1);
+                                moved = true;
+                            }
+                        }
+                        else if(distToOther < 5)
+                        {   // you can see them, but not pounce, so move towards them
+                            var currentNext = adjSpots[0];
+                            var nextNext;
+                            var currentToT = 0;
+                            var nextToT = 0;
+                            for(var z = 1; z < adjSpots.length; z++)
+                            {
+                                nextNext = adjSpots[z];
+                                currentToT = manDist(currentNext.toString(), [otherSpider.locX, otherSpider.locY].toString());
+                                nextToT = manDist([nextNext[0],nextNext[1]].toString(),[otherSpider.locX,otherSpider.locY].toString());
+                                if(currentToT >= nextToT)
+                                    currentNext = nextNext;
+                            }
+                            
+                            tempSpider.locX = currentNext[0];
+                            tempSpider.locY = currentNext[1];
+                            moved = true;
+                        }
+                    }
+                    else
+                    {
+                        if(distToOther < 5)
+                        {   // you can see them and they're bigger, run
+                            var currentNext = adjSpots[0];
+                            var nextNext;
+                            var currentToT = 0;
+                            var nextToT = 0;
+                            for(var j = 1; j < adjSpots.length; j++)
+                            {
+                                nextNext = adjSpots[j];
+                                currentToT = manDist(currentNext.toString(), [otherSpider.locX, otherSpider.locY].toString());
+                                nextToT = manDist([nextNext[0],nextNext[1]].toString(),[otherSpider.locX,otherSpider.locY].toString());
+                                if(currentToT <= nextToT)
+                                {   // if nextTot is larger (farther)
+                                    currentNext = nextNext;
+                                }
+                            }
+                            tempSpider.locX = currentNext[0];
+                            tempSpider.locY = currentNext[1];
+                            moved = true;
+                        }
+                    }
+                }
+            }  
+        }
+        if(!moved)
+        {
+            // random move behavior
+            next = randomNext(adjSpots);
+            tempSpider.locX = next[0];
+            tempSpider.locY = next[1];
+        }
+    }
+    
+}
+
+function highlightPath()
+{
+    ctx.fillStyle = '#AAAAAA';
+    for(x = 0; x < path.length; x++)
+    {
+        ctx.fillRect(path[x][0]*BLOCKSIZE, path[x][1]*BLOCKSIZE, BLOCKSIZE, BLOCKSIZE);
+    }
+    ctx.fillStyle = '#5DFC0A';
+    ctx.fillRect(GOAL*BLOCKSIZE, GOAL*BLOCKSIZE, BLOCKSIZE, BLOCKSIZE);
+}
+
+function addSpider()
+{
+    // get random location for it
+    var newX = Math.floor(Math.random()*MAZESIZE);
+    var newY = Math.floor(Math.random()*MAZESIZE);
+    dontBreak = 0;
+    while(checkSpiderLoc(newX, newY) != true)
+    {
+        dontBreak++;
+        newX = Math.floor(Math.random()*MAZESIZE);
+        newY = Math.floor(Math.random()*MAZESIZE);
+        if(dontBreak == MAZESIZE*MAZESIZE)
+        {
+            console.log("no space for spiders!");
+            return;
+        }
+    }
+    var tempSize = Math.floor(Math.random()*3);
+    
+    var newSpider = {
+        size: tempSize,
+        locX: newX,
+        locY: newY
+    }
+    spiders.push(newSpider);
+    drawSpiders();
+}
+
+function checkSpiderLoc(x,y)
+{
+    if(mazeArray[x][y][0] == SPACE)
+        return false;
+    else
+    {
+        for(z = 0; z < spiders.length; z++)
+        {
+            var tempDist = manDist([x,y].toString(), [spiders[z].locX, spiders[z].locY].toString());
+            if(tempDist < 3)
+                return false;
+        }
+    }
+    if(manDist([x,y].toString(), theseusLoc.toString()) < 3)
+        return false;
+    if(getAdj(x,y,1).length == 0)
+        return false;
+    return true;
+}
+
+function doKeyDown(evt)
+{
+    if(!theseusDead)
+    {
+        switch (evt.keyCode) 
+        {
+            case 32: // Space bar was pressed 
+                if(path.length > 0)
+                    moveTheseus();
+                updateSpiders();
+                drawMaze();
+                drawTheseus();
+                drawSpiders();
+                
+                break;
+            case 65:    // a was pressed
+                if(theseusLoc[0] == GOAL && theseusLoc[1] == GOAL)
+                    break;
+                var startTime = new Date().getTime();
+                aStar(theseusLoc, [GOAL,GOAL]);
+                var elapsed = new Date().getTime() - startTime;
+                console.log("A* path: " + path.reverse());
+                console.log("A* took " + elapsed + " milliseconds to run.");
+                path.reverse();
+                drawMaze();
+                drawTheseus();
+                drawSpiders();
+                highlightPath();
+                break;
+            case 66:    // b was pressed
+                if(theseusLoc[0] == GOAL && theseusLoc[1] == GOAL)
+                    break;
+                var startTime = new Date().getTime();
+                bfs(theseusLoc, [GOAL,GOAL]);
+                var elapsed = new Date().getTime() - startTime;
+                //getPath(bfs, [theseusLoc[0], theseusLoc[1]]);
+                console.log("BFS path : " + path.reverse());
+                console.log("bfs took " + elapsed + " milliseconds to run.");
+                path.reverse();
+                drawMaze();
+                drawTheseus();
+                drawSpiders();
+                highlightPath();
+                break;
+            case 71:    // g was pressed
+                console.log("Most recent path checked " + aStarCheckedNodes + " nodes.");
+                break;
+            case 83:    // s was pressed
+                // ADD A SPIDER
+                addSpider();
+                break;
+        }
+    }
+}
+
+function moveTheseus()
+{
+    next = path.pop();
+    if(smartTheseus)
+    {
+        var adjThes = getAdj(theseusLoc[0], theseusLoc[1], 0);
+        var currentNext = next;
+        var findNewSpot = false;
+        for(var x = 0; x < spiders.length; x++)
+        {
+            var tempSpider = spiders[x];
+            var distToSpider = manDist(currentNext.toString(), [tempSpider.locX,tempSpider.locY].toString());
+            if(distToSpider < 5)
+            {   // don't go to that spot, idiot
+                findNewSpot = true;
+            }
+        }
+        
+        if(findNewSpot)
+        {
+            var adjClosestSpider = 0;
+            var closestToThisSpot = distToSpider;
+            var adjBestSpot = adjThes[0];
+            for(var y = 0; y < adjThes.length; y++)
+            {   // for each adjacent spot, get the closest it is to any spider
+                closestToThisSpot = MAZESIZE*MAZESIZE;
+                for(var z = 0; z < spiders.length; z++)
+                {
+                    tempSpider = spiders[z];
+                    var newDist =  manDist(adjThes[y].toString(), [tempSpider.locX,tempSpider.locY].toString());
+                    if(newDist < closestToThisSpot)
+                        closestToThisSpot = newDist;
+                }
+                if(closestToThisSpot > adjClosestSpider)
+                {
+                    adjClosestSpider = closestToThisSpot;
+                    adjBestSpot = adjThes[y];
+                }
+            }
+            theseusLoc = adjBestSpot;
+            aStar(theseusLoc, [GOAL,GOAL]);
+        }
+        else
+        {
+            theseusLoc[0] = next[0];
+            theseusLoc[1] = next[1];
+        }
+    }
+    else
+    {
+        theseusLoc[0] = next[0];
+        theseusLoc[1] = next[1];
+    }
+}
+
+function bfs(begin, goal)
+{   
+    /*
+    // returns a path from the start to the goal using dijkstra's algo
+    
+    //var startTime = timer.getTime();
+    //var start = nowDate.now();
+    path = [];
+    for(x = 0; x < MAZESIZE; x++)
+    {
+        bfsDist[x] = [];
+        bfsPrev[x] = [];
+        bfsCol[x] = [];
+        for(y = 0; y < MAZESIZE; y++)
+        {
+            bfsDist[x][y] = MAZESIZE*MAZESIZE;  // basically inf
+            bfsPrev[x][y] = [];
+            bfsCol[x][y] = 0;   // 0 is white
+        }
+    }
+    bfsCol[start[0]][start[1]] = 1; // 1 is gray
+    bfsDist[start[0]][start[1]] = 0;
+    bfsQ = [];
+    bfsQ.push(start);
+    while(bfsQ.length > 0)
+    {
+        bfsCheckedNodes++;
+        // pop first thing off queue
+        var temp = bfsQ.shift();
+        adjSpots = getAdj(temp[0], temp[1], 0);
+        for(x = 0; x < adjSpots.length; x++)
+        {
+            if(bfsCol[adjSpots[x][0]][adjSpots[x][1]] == 0)
+            {
+                bfsCol[adjSpots[x][0]][adjSpots[x][1]] = 1;
+                bfsDist[adjSpots[x][0]][adjSpots[x][1]] = bfsDist[temp[0]][temp[1]] + 1;
+                bfsPrev[adjSpots[x][0]][adjSpots[x][1]] = temp;
+                if(adjSpots[x][0] == end[0] && adjSpots[x][1] == end[1])
+                {    
+                    //console.log("dist from start to goal is " + bfsDist[end[0]][end[1]]);
+                    path.push([GOAL,GOAL]);
+                    var temp = bfsPrev[GOAL][GOAL];
+                    //console.log("temp = " + temp);
+                    while(temp[0] != start[0] || temp[1] != start[1])
+                    {
+                        path.push([temp[0], temp[1]]);
+                        temp = bfsPrev[temp[0]][temp[1]];
+                       // console.log("temp = " + temp);
+                    }
+                    return;
+                }
+                bfsQ.push(adjSpots[x]);
+            }
+        }
+        bfsCol[temp] = 2;
+    }*/
+    
+    var start = begin.toString();
+    var end = goal.toString();
+    var closed = [];
+    var open = PriorityQueue({low:true});
+    var cameFrom = [];
+    var current;
+    var curAdj;
+    var neighbor;
+    var gScore = [];
+    var hScore = [];
+    var fScore = [];
+    var neighbors = [];
+    var tempScore;
+    var tempIsBetter;
+    var toAdd;
+    path = [];
+
+    gScore[start] = 0;
+    hScore[start] = 0;//manDist(start, end);
+    fScore[start] = gScore[start] + hScore[start];
+    open.push(start, fScore[start]);
+    while(open.size() > 0)
+    {
+        aStarCheckedNodes++;
+        current = open.pop();
+        if(current == end)
+            break;
+        closed.push(current);
+        currentArr = strToCoords(current);
+        neighbors = getAdj(currentArr[0], currentArr[1], 0);
+        for(x = 0; x < neighbors.length; x++)
+        {
+            neighbor = neighbors[x].toString();
+            if(closed.indexOf(neighbor) == -1)
+            { // not in closed
+                tempScore = gScore[current] + 1;
+                if(!open.includes(neighbor))
+                {
+                    // need to update fScore[neighbor]
+                    hScore[neighbor] = 0;//manDist(neighbor, end);
+                    toAdd = true;
+                    tempIsBetter = true;
+                }
+                else if(tempScore <= gScore[neighbor])
+                {
+                    tempIsBetter = true;
+                    toAdd = false;
+                }
+                else
+                {
+                    tempIsBetter = false;
+                    toAdd = false;
+                }
+                if(tempIsBetter)
+                {
+                    cameFrom[neighbor] = current;
+                    gScore[neighbor] = tempScore;
+                    fScore[neighbor] = gScore[neighbor] + hScore[neighbor];
+                }
+                if(toAdd == true)
+                    open.push(neighbor, fScore[neighbor]);
+            }
+        }
+    }
+    // generate path
+    path.push(strToCoords(end));
+    var nextInPath = cameFrom[end];
+    while(nextInPath != start)
+    {
+        path.push(strToCoords(nextInPath));
+        nextInPath = cameFrom[nextInPath];
+    }
+    //console.log("aStarPath = " + aStarPath);
+    
+}
+
+function strToCoords(str)
+{
+    var toR = str.split(",");
+    for(var i=0; i<toR.length; i++)
+    {
+        toR[i] = parseInt(toR[i])
+    }
+    return toR;
+}
+function aStar(begin, goal)
+{
+    var start = begin.toString();
+    var end = goal.toString();
+    var closed = [];
+    var open = PriorityQueue({low:true});
+    var cameFrom = [];
+    var current;
+    var curAdj;
+    var neighbor;
+    var gScore = [];
+    var hScore = [];
+    var fScore = [];
+    var neighbors = [];
+    var tempScore;
+    var tempIsBetter;
+    var toAdd;
+    path = [];
+
+    gScore[start] = 0;
+    hScore[start] = manDist(start, end);
+    fScore[start] = gScore[start] + hScore[start];
+    open.push(start, fScore[start]);
+    while(open.size() > 0)
+    {
+        aStarCheckedNodes++;
+        current = open.pop();
+        if(current == end)
+            break;
+        closed.push(current);
+        currentArr = strToCoords(current);
+        neighbors = getAdj(currentArr[0], currentArr[1], 0);
+        for(x = 0; x < neighbors.length; x++)
+        {
+            neighbor = neighbors[x].toString();
+            if(closed.indexOf(neighbor) == -1)
+            { // not in closed
+                tempScore = gScore[current] + 1;
+                if(!open.includes(neighbor))
+                {
+                    // need to update fScore[neighbor]
+                    hScore[neighbor] = manDist(neighbor, end);
+                    toAdd = true;
+                    tempIsBetter = true;
+                }
+                else if(tempScore <= gScore[neighbor])
+                {
+                    tempIsBetter = true;
+                    toAdd = false;
+                }
+                else
+                {
+                    tempIsBetter = false;
+                    toAdd = false;
+                }
+                if(tempIsBetter)
+                {
+                    cameFrom[neighbor] = current;
+                    gScore[neighbor] = tempScore;
+                    fScore[neighbor] = gScore[neighbor] + hScore[neighbor];
+                }
+                if(toAdd == true)
+                    open.push(neighbor, fScore[neighbor]);
+            }
+        }
+    }
+    // generate path
+    path.push(strToCoords(end));
+    var nextInPath = cameFrom[end];
+    while(nextInPath != start)
+    {
+        path.push(strToCoords(nextInPath));
+        nextInPath = cameFrom[nextInPath];
+    }
+}
+
+function manDist(from, to)
+{   // manhattan distance of from -> to
+    from = strToCoords(from);
+    to = strToCoords(to);
+    return Math.max(Math.abs(from[0]-to[0]), Math.abs(from[1] - to[1]));
+}
+
+function getAdj(x,y, wall)
+{   // returns an array of arrays of x,y pairs of adjacent squares
+    // always a max of 8, must check for them to be out of bounds
+    // wall = 0 means only spaces, wall = 1 is only walls, wall = 2 is both
+    var toR = [];
+    var temp = [];
+    var xShift;
+    var yShift;
+    for(xShift = x-1; xShift < x+2; xShift++)
+    {
+        for(yShift = y-1; yShift < y+2; yShift++)
+        {
+            if(xShift >= 0 && xShift < MAZESIZE && yShift >= 0 && yShift < MAZESIZE)
+            {
+                if(xShift != x || yShift != y)
+                {
+                    toR.push([xShift, yShift]);
+                }
+            } 
+        }
+    }
+    if(wall == 0)
+    {   // return only spaces 
+        for(x = 0; x < toR.length; x++)
+        {
+            if(mazeArray[toR[x][0]][toR[x][1]][0] == SPACE) // this is weird
+            {
+                temp.push(toR[x]);
+            }
+        }
+        return temp;
+    }
+    else if(wall == 1)
+    {   // return only walls
+        for(x = 0; x < toR.length; x++)
+        {
+            if(mazeArray[toR[x][0]][toR[x][1]][0] == WALL)
+            {
+                temp.push(toR[x]);
+            }
+        }
+        return temp;
+    }
+    else
+    {   
+        for(x = 0; x < toR.length; x++)
+        {
+                if(temp.indexOf(toR[x]) == -1)
+                    temp.push(toR[x]);
+        }
+        return temp;
+    }
+}
+
+function getAdjChangeable(toR)
+{
+    var temp = [];
+    for(x = 0; x < toR.length; x++)
+    {
+        if(mazeArray[toR[x][0]][toR[x][1]][1] == CHANGEABLE)
+            temp.push(toR[x]);
+    }
+    return temp;
+}
+
+function getAdjUnvisited(toR)
+{
+    var temp = [];
+    for(x = 0; x < toR.length; x++)
+    {
+        if(mazeArray[toR[x][0]][toR[x][1]][2] == 0)
+            temp.push(toR[x]);
+    }
+    return temp;
+}
+
+function getAdj4Way(x,y, wall)
+{   // returns an array of arrays of x,y pairs of adjacent squares
+    // always a max of 8, must check for them to be out of bounds
+    // wall = 0 means only spaces, wall = 1 is only walls, wall = 2 is both
+    var toR = [];
+    var temp = [];
+    var xShift;
+    var yShift;
+    /*for(xShift = x-1; xShift < x+2; xShift++)
+    {
+        for(yShift = y-1; yShift < y+2; yShift++)
+        {
+            if(xShift >= 0 && xShift < MAZESIZE && yShift >= 0 && yShift < MAZESIZE)
+            {
+                if(xShift != x || yShift != y)
+                {
+                    
+                    toR.push([xShift, yShift]);
+                }
+            } 
+        }
+    }*/
+    if(x > 1)
+        toR.push([x-1, y]);
+    if(x < MAZESIZE-1)
+        toR.push([x+1, y]);
+    if(y > 1)
+        toR.push([x, y-1]);
+    if(y < MAZESIZE-1)
+        toR.push([x, y+1]);
+    
+    if(wall == 0)
+    {   // return only spaces 
+        for(x = 0; x < toR.length; x++)
+        {
+            if(mazeArray[toR[x][0]][toR[x][1]][0] == SPACE) // this is weird
+            {
+                temp.push(toR[x]);
+            }
+        }
+        return temp;
+    }
+    else if(wall == 1)
+    {   // return only walls
+        for(x = 0; x < toR.length; x++)
+        {
+            if(mazeArray[toR[x][0]][toR[x][1]][0] == WALL)
+            {
+                if(temp.indexOf(toR[x]) == -1)
+                    temp.push(toR[x]);
+            }
+        }
+    }
+    else
+    {   
+        for(x = 0; x < toR.length; x++)
+        {
+                if(temp.indexOf(toR[x]) == -1)
+                    temp.push(toR[x]);
+        }
+        return temp;
+    }
+}
+
+function randomNext(adjPoints)
+{
+    toGet = Math.floor(Math.random()*adjPoints.length);
+    return adjPoints[toGet];
+}
+
+
+createMaze();
+drawMaze();
+changeMaze(START, 0);  
+drawMaze();
+drawTheseus();
+
+window.addEventListener('keydown',doKeyDown,true);
+
+</script>
+</BODY>
+</html>
