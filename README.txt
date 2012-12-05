@@ -2,8 +2,8 @@ Random maze generation
 Djikstra's/A* pathfinding
 Simple avoidance AI
 
-A3.html is preconfigured to give a semi-interesting setup.
-A3Random.html...is just random.  Could be interesting, could be boring.
+maze.html is preconfigured to give a semi-interesting setup.
+randomMaze.html...is just random.  Could be interesting, could be boring.
 
 At the top of these, there are parameters that can be changed for maze size and map scale (blocksize).
 Feel free to play around with these, however, you might have to change the canvas size if you make a 
